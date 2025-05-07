@@ -1,0 +1,180 @@
+# Main Layer Implementation (main.cpp)
+
+The main layer serves as RobotZero's orchestration center, integrating all subsystems and managing the robot's core operation sequence. The implementation follows a non-blocking state machine pattern during setup and implements a  control loop for line following, with careful integration of the CourseMarkers system and debug capabilities.
+
+## Setup Phase Implementation
+
+The initialization process follows a carefully designed state machine with seven distinct states:
+
+```cpp
+enum SetupState {
+    SETUP_INIT,        // Initial system configuration
+    SETUP_WAIT1,       // First stabilization delay
+    SETUP_WAIT2,       // Second stabilization delay
+    SETUP_BUTTON1,     // Wait for first button press
+    SETUP_CALIBRATION, // Sensor calibration sequence
+    SETUP_BUTTON2,     // Wait for start signal
+    SETUP_COMPLETE     // System ready
+};
+```
+
+During the setup phase, the system progresses through these states sequentially, ensuring proper hardware initialization and system stability. The non-blocking design allows for proper timing and user interaction without using delay functions that could impact system responsiveness:
+
+```cpp
+void setup() {
+#if DEBUG_LEVEL > 0
+    Serial.begin(115200);
+    ProfileManager::initialize(currentDebugMode);
+    kProportional = ProfileManager::getKP(K_PROPORTIONAL_DEFAULT);
+    kDerivative = ProfileManager::getKD(K_DERIVATIVE_DEFAULT);
+    filterCoefficient = ProfileManager::getFilterCoefficient(FILTER_COEFFICIENT_DEFAULT);
+    FlashManager::initialize();
+    Logger::initialize();
+#endif
+
+    SetupState setupState = SETUP_INIT;
+    Timer setupTimer;
+
+    while (setupState != SETUP_COMPLETE) {
+        switch (setupState) {
+        case SETUP_INIT:
+            setupTimer.Start(SETUP_DELAY);
+            setupState = SETUP_WAIT1;
+            break;
+            // ... additional states
+        }
+    }
+}
+```
+
+## Main Control Loop
+
+The main control loop implements a  integration between the CourseMarkers system, debug facilities, and core robot control:
+
+```cpp
+void loop() {
+#if DEBUG_LEVEL > 0
+    LedPattern::process();
+#endif
+
+    CourseMarkers::processMarkerSignals();
+
+    if (isRobotStopped) {
+        MotorDriver::setMotorsPower(0, 0);
+#if DEBUG_LEVEL > 0
+        if (Logger::isLogging()) {
+            Logger::endSession();
+        }
+#endif
+        return;
+    }
+
+    // Core control sequence
+    int linePosition = Sensors::calculateLinePosition();
+    int error = linePosition - targetLinePosition;
+    
+#if DEBUG_LEVEL > 0
+    currentSpeed = ProfileManager::getSpeedValue(CourseMarkers::speedControl(error));
+#else
+    currentSpeed = CourseMarkers::speedControl(error);
+#endif
+
+    // PID and motor control
+    int d_error = error - previousError;
+    filteredErrorRate = filterCoefficient * d_error + 
+                       (1 - filterCoefficient) * filteredErrorRate;
+
+    float proportional_term = kProportional * error;
+    float derivative_term = kDerivative * filteredErrorRate;
+    float total_correction = proportional_term + derivative_term;
+}
+```
+
+## Control System Integration
+
+The control system implements several features:
+
+1. **Early Return Optimization**: The system checks for stopped condition before performing any control calculations, optimizing processor usage.
+
+2. **Time-Critical Operations**: Marker processing occurs at the start of each loop, ensuring consistent timing for course feature detection.
+
+3. **Adaptive Speed Control**: The system dynamically adjusts motor power based on current conditions:
+   
+    ```cpp
+    float speed_factor = (currentSpeed > 200) ? 0.85f : 1.0f;
+    int correction_power = constrain(int(total_correction * speed_factor), -255, 255);
+
+    int left_power = constrain(currentSpeed + correction_power, -255, 255);
+    int right_power = constrain(currentSpeed - correction_power, -255, 255);
+    ```
+
+4. **Error Filtering**: The derivative term uses an exponential filter to smooth sensor noise while maintaining responsiveness:
+   
+    ```cpp
+    filteredErrorRate = filterCoefficient * d_error + 
+                    (1 - filterCoefficient) * filteredErrorRate;
+    ```
+
+## Debug Integration
+
+When operating in debug mode (`DEBUG_LEVEL > 0`), the system provides comprehensive monitoring and analysis capabilities:
+
+```cpp
+#if DEBUG_LEVEL > 0
+    if (Logger::isLogging()) {
+        uint8_t state = 0;
+        if (isPrecisionMode) state |= 0x01;
+        if (abs(error) > TURN_THRESHOLD) state |= 0x02;
+
+        Logger::logPerformance(linePosition, error, correction_power,
+            left_power, right_power, state);
+        Logger::process();
+    }
+#endif
+```
+
+The debug system captures:
+- Line position and error values;
+- Applied corrections and motor powers;
+- System state flags (precision mode, turn detection);
+- Performance metrics for post-run analysis.
+
+## Global State Management
+
+The system maintains critical state variables that coordinate behaviour across all components:
+
+```cpp
+int currentSpeed = 0;               // Current base speed
+bool isRobotStopped = false;        // Robot stopped state
+bool isStopSequenceActive = false;  // Stopping sequence active
+int lapCount = 0;                   // End marker counter
+bool isPrecisionMode = false;       // Precision mode active
+```
+
+These variables are carefully managed to ensure consistent behaviour across all operating modes and conditions.
+
+## Control Parameters
+
+The control system maintains configurable parameters that can be adjusted based on operating mode:
+
+```cpp
+int targetLinePosition = POSICION_IDEAL_DEFAULT;
+float kProportional = K_PROPORTIONAL_DEFAULT;
+float kDerivative = K_DERIVATIVE_DEFAULT;
+float filterCoefficient = FILTER_COEFFICIENT_DEFAULT;
+int filteredErrorRate = 0;
+int previousError = 0;
+```
+
+In debug mode, these parameters can be modified by the ProfileManager to optimize performance for different operating conditions.
+
+## Performance Considerations
+
+The main control loop has been optimized for the Arduino Nano's limited resources:
+- Critical operations are prioritized at the start of each loop;
+- Conditional compilation removes debug overhead in production;
+- State variables are used efficiently to minimize RAM usage;
+- Calculations use integer arithmetic where possible;
+- Function calls are minimized in critical paths.
+
+This implementation provides precise control while maintaining real-time performance and enabling  debug capabilities when needed.

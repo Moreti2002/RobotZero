@@ -1,0 +1,43 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+.pio/build/project.checksum
+.pio/build/uno/.sconsign311.dblite
+.pio/build/uno/firmware.elf
+.pio/build/uno/firmware.hex
+.pio/libdeps/uno/integrity.dat
+.vscode/c_cpp_properties.json
+.vscode/extensions.json
+.vscode/launch.json
+.vscode/settings.json
+src/.vscode/settings.json
+.pio/build/uno/idedata.json
